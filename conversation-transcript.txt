@@ -1,0 +1,24 @@
+Caller: I'm building a VST plugin with JUCE, and right now the UI is all native C++ — vector-drawn components, custom LookAndFeel, the usual path.
+Cursor: That's a solid baseline. Native JUCE drawing gives you tight control and low overhead inside the host.
+Caller: Yeah, but I'm considering switching to a web-based UI. Partly for layout flexibility, partly so I can iterate on the front end without rebuilding the plugin every time.
+Cursor: Common fork in the road. With JUCE you've basically got WebBrowserComponent wrapping the platform web view, or something like Ultralight that you embed yourself.
+Caller: How do those compare on performance and RAM? Hosts get cranky if every instance eats a pile of memory.
+Cursor: Platform web views and full Chromium embeds are heavier. You pay for a real browser stack per view or per process model, and audio plugin hosts often open several editor windows, so that multiplies fast.
+Caller: What about shipping size if I embed a web view in the plugin?
+Cursor: Rough ballparks: CEF is about a hundred fifty to two hundred fifty megabytes on disk. WebView2's fixed runtime is around a hundred fifty megabytes if you're bundling or depending on that redistributable footprint. Ultralight is much smaller — typically in the twenty to forty megabyte range.
+Caller: So Ultralight looks attractive for install size. Does it actually support WebGL and normal JavaScript for a modern UI?
+Cursor: It has JavaScript and a WebGL-ish path, but it's not a full Chrome. You're on a narrower engine — older web platform surface, quirks around advanced CSS and APIs, and WebGL support has limits compared to desktop Chromium. Fine for a controlled plugin UI; painful if you assume every npm demo just works.
+Caller: What are the main drawbacks I should expect?
+Cursor: Smaller community than CEF or system WebView2, more DIY integration, occasional gaps when a library needs bleeding-edge browser features, and you own GPU/resource lifetime instead of handing it to the OS web view.
+Caller: How would I wire Ultralight into JUCE?
+Cursor: Subclass juce::Component. In paint, take the Ultralight surface or bitmap for that view and draw it into the JUCE Graphics context — or blit via OpenGL if you're on a GL path. Forward mouse, keyboard, and focus from the JUCE component into Ultralight's input APIs. Then set up JS bindings so the page can call into your processor parameters and so C++ can push state back into the DOM.
+Caller: If I have multiple plugin instances open, can they share one Ultralight renderer, or does each instance need its own? Especially with multiple OpenGL contexts in the host.
+Cursor: Prefer one shared Ultralight renderer or driver for the process, with separate views per editor instance. Sharing saves RAM and init cost, but you have to serialize access and be careful when each editor sits on a different OpenGL context — make the current context explicit before you render that view's GPU resources, and don't assume Ultralight's GPU objects are freely portable across unrelated contexts without your own coordination.
+Caller: Separately, what about staying fully native and just using JUCE OpenGL through juce::OpenGLContext?
+Cursor: Attach an OpenGLContext to your component, implement OpenGLRenderer, and put the frame work in renderOpenGL. That's the supported JUCE path for GL UIs and visualizations.
+Caller: Should I use one shared OpenGL context for everything, or a context per component?
+Cursor: A single shared context is usually cheaper and avoids thrashing. Per-component contexts are simpler isolation-wise but you pay for context switches every time the host or your UI moves between them, and that cost shows up when several editors or GL views are active. Share when you can; isolate when a host or platform forces your hand.
+Caller: And if I still paint some 2D with JUCE Graphics on top of OpenGL?
+Cursor: You have to composite deliberately — either render GL first and overlay cached 2D into the framebuffer, or draw 2D to a texture and composite in the GL renderer. Don't assume paint and renderOpenGL automatically layer the way software-only components do; coordinate dirty regions and avoid fighting over the same back buffer.
+Caller: Okay. So short version: native vector UI is lightest; web UI is flexible but heavy unless I embed something like Ultralight carefully; and if I go GL-native, share contexts and own the compositing.
+Cursor: That's the tradeoff map. Pick based on whether your bottleneck is designer iteration, binary size and RAM in the DAW, or custom GL visuals.
